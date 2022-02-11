@@ -1,8 +1,82 @@
-import Head from 'next/head'
-import Image from 'next/image'
-import styles from '../styles/Home.module.css'
+import Head from "next/head";
+import Image from "next/image";
+import styles from "../styles/Home.module.css";
+import { useState, useEffect } from "react";
+import useAlchemy from "../lib/useAlchemy";
+import CoinGecko from "coingecko-api";
+import CR_BOND_ABI from "../lib/contracts/crbond_abi.json";
+import CR_SLP_ABI from "../lib/contracts/cr_slp_abi.json";
 
 export default function Home() {
+  const DECIMALS = 100000000000000000;
+  const PRETTY_NUMBER = Intl.NumberFormat("en-US");
+  const PRETTY_CURRENCY = Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  });
+  const PRETTY_PERCENT = Intl.NumberFormat("en-US", {
+    style: "percent",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  const [trueBondPrice, setTrueBondPrice] = useState(0);
+  const [maticPrice, setMaticPrice] = useState(0);
+  const [raiderPrice, setRaiderPrice] = useState(0);
+  const [slpTotalSupply, setSlpTotalSupply] = useState(0);
+  const [slpMaticReserves, setSlpMaticReserves] = useState(0);
+  const [slpRaiderReserves, setSlpRaiderReserves] = useState(0);
+  const [slpPrice, setSlpPrice] = useState(0);
+  const [bondPrice, setBondPrice] = useState(0);
+  const [roi, setRoi] = useState(0);
+  const { useContract } = useAlchemy(process.env.NEXT_PUBLIC_ALCHEMY_API_KEY);
+  const bondContract = useContract(
+    "0xee57F4C39CEfA70Ce8D07767136e5F40042CCa1b",
+    CR_BOND_ABI
+  );
+  const slpContract = useContract(
+    "0x2e7d6490526c7d7e2fdea5c6ec4b0d1b9f8b25b7",
+    CR_SLP_ABI
+  );
+  const CoinGeckoClient = new CoinGecko();
+  const refreshBondPrice = async () => {
+    const getTrueBondPrice = bondContract.methods.trueBondPrice().call();
+    const getSlpTotalSupply = slpContract.methods.totalSupply().call();
+    const getSlpReserves = slpContract.methods.getReserves().call();
+    const getCoinPrices = CoinGeckoClient.simple.price({
+      ids: ["crypto-raiders", "matic-network"],
+      vs_currencies: ["usd"],
+    });
+
+    const results = await Promise.all([
+      getTrueBondPrice,
+      getCoinPrices,
+      getSlpTotalSupply,
+      getSlpReserves,
+    ]);
+    const trueBondPrice = results[0] / 10000000;
+    setTrueBondPrice(trueBondPrice);
+    const maticPrice = results[1].data["matic-network"]["usd"];
+    setMaticPrice(maticPrice);
+    const raiderPrice = results[1].data["crypto-raiders"]["usd"];
+    setRaiderPrice(raiderPrice);
+    const slpTotalSupply = Number(results[2]) / DECIMALS;
+    setSlpTotalSupply(slpTotalSupply);
+    const slpMaticReserves = Number(results[3]["0"] / DECIMALS);
+    setSlpMaticReserves(slpMaticReserves);
+    const slpRaiderReserves = Number(results[3]["1"] / DECIMALS);
+    setSlpRaiderReserves(slpRaiderReserves);
+    const slpValue =
+      slpMaticReserves * maticPrice + slpRaiderReserves * raiderPrice;
+    const slpPrice = slpValue / slpTotalSupply;
+    setSlpPrice(slpPrice);
+    const bondPrice = slpPrice * trueBondPrice;
+    setBondPrice(bondPrice);
+    const roi = raiderPrice / bondPrice - 1;
+    setRoi(roi);
+  };
+  useEffect(() => {
+    refreshBondPrice();
+  });
   return (
     <div className={styles.container}>
       <Head>
@@ -12,58 +86,28 @@ export default function Home() {
       </Head>
 
       <main className={styles.main}>
-        <h1 className={styles.title}>
-          Welcome to <a href="https://nextjs.org">Next.js!</a>
-        </h1>
-
-        <p className={styles.description}>
-          Get started by editing{' '}
-          <code className={styles.code}>pages/index.js</code>
-        </p>
-
-        <div className={styles.grid}>
-          <a href="https://nextjs.org/docs" className={styles.card}>
-            <h2>Documentation &rarr;</h2>
-            <p>Find in-depth information about Next.js features and API.</p>
-          </a>
-
-          <a href="https://nextjs.org/learn" className={styles.card}>
-            <h2>Learn &rarr;</h2>
-            <p>Learn about Next.js in an interactive course with quizzes!</p>
-          </a>
-
-          <a
-            href="https://github.com/vercel/next.js/tree/canary/examples"
-            className={styles.card}
-          >
-            <h2>Examples &rarr;</h2>
-            <p>Discover and deploy boilerplate example Next.js projects.</p>
-          </a>
-
-          <a
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=default-template&utm_campaign=create-next-app"
-            className={styles.card}
-          >
-            <h2>Deploy &rarr;</h2>
-            <p>
-              Instantly deploy your Next.js site to a public URL with Vercel.
-            </p>
-          </a>
-        </div>
+        <dl>
+          <dt>True Bond Price: </dt>
+          <dd>{trueBondPrice}</dd>
+          <dt>Matic Price: </dt>
+          <dd>{PRETTY_CURRENCY.format(maticPrice)}</dd>
+          <dt>Raider Price: </dt>
+          <dd>{PRETTY_CURRENCY.format(raiderPrice)}</dd>
+          <dt>SLP Total Supply: </dt>
+          <dd>{PRETTY_NUMBER.format(slpTotalSupply)}</dd>
+          <dt>SLP Matic Reserves: </dt>
+          <dd>{PRETTY_NUMBER.format(slpMaticReserves)}</dd>
+          <dt>SLP RaiderReserves: </dt>
+          <dd>{PRETTY_NUMBER.format(slpRaiderReserves)}</dd>
+          <dt>SLP Price: </dt>
+          <dd>{PRETTY_CURRENCY.format(slpPrice)}</dd>
+          <dt>Bond Price</dt>
+          <dd>{PRETTY_CURRENCY.format(bondPrice)}</dd>
+          <dt>ROI</dt>
+          <dd>{PRETTY_PERCENT.format(roi)}</dd>
+        </dl>
+        <button onClick={() => refreshBondPrice()}>Refresh</button>
       </main>
-
-      <footer className={styles.footer}>
-        <a
-          href="https://vercel.com?utm_source=create-next-app&utm_medium=default-template&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Powered by{' '}
-          <span className={styles.logo}>
-            <Image src="/vercel.svg" alt="Vercel Logo" width={72} height={16} />
-          </span>
-        </a>
-      </footer>
     </div>
-  )
+  );
 }
